@@ -237,7 +237,7 @@ def _generate_subexamples(example, seq_length, tokenizer):
   #logger.debug(f'Expecting a total of {np.ceil(n_tokens / window_size)} chunks from this document of length {n_tokens}.')
 
   for i, embedding_start in enumerate(range(0, n_tokens, stride)):
-      embedding_mask = [0] * window_size + 2 * context  # Matrix for keeping track of what parts of each sequence is supposed to be embedded at each step.  
+      embedding_mask = [0] * (window_size + 2 * context)  # Matrix for keeping track of what parts of each sequence is supposed to be embedded at each step.  
       #logger.debug(f'Working with segment {i}')
       if embedding_start == 0:  # first tokens
           start = 0
