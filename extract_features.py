@@ -26,6 +26,7 @@ import re
 import modeling
 import tokenization
 import tensorflow as tf
+import numpy as np
 
 flags = tf.flags
 
@@ -86,15 +87,24 @@ class InputExample(object):
     self.text_b = text_b
 
 
+class InputSubexample(object):
+
+  def __init__(self, unique_id, tokens_a, embedding_mask):
+    self.unique_id = unique_id
+    self.tokens_a = tokens_a
+    self.embedding_mask = embedding_mask
+
+
 class InputFeatures(object):
   """A single set of features of data."""
 
-  def __init__(self, unique_id, tokens, input_ids, input_mask, input_type_ids):
+  def __init__(self, unique_id, tokens, input_ids, input_mask, input_type_ids, embedding_mask):
     self.unique_id = unique_id
     self.tokens = tokens
     self.input_ids = input_ids
     self.input_mask = input_mask
     self.input_type_ids = input_type_ids
+    self.embedding_mask = embedding_mask
 
 
 def input_fn_builder(features, seq_length):
@@ -207,95 +217,126 @@ def model_fn_builder(bert_config, init_checkpoint, layer_indexes, use_tpu,
   return model_fn
 
 
+def _generate_subexamples(example, seq_length, tokenizer):
+  '''Takes an example and returns a list of subexamples that fit the size of seq_len'''
+  #logger.debug('------- New row to process -------')
+  window_size = int(seq_length / 2)
+  context = int(window_size / 2) - 1  # To make room for [CLS] and [SEP] tokens. 
+  stride = window_size
+  tokens = tokenizer.tokenize(example.text_a)
+  n_tokens = len(tokens)
+
+  subexamples = []
+
+  if n_tokens < window_size + 2 * context:  # The entire text will fit within the scope of window and context in the first pass. No need to process this text twice. 
+      #logger.debug('The entire text will fit within the scope of window and context in the first pass. No need to process this text twice. ')
+      subexamples.append(InputSubexample((example.unique_id, 0), tokens, [1] * n_tokens))
+      return subexamples
+  #end if
+
+  #logger.debug(f'Expecting a total of {np.ceil(n_tokens / window_size)} chunks from this document of length {n_tokens}.')
+
+  for i, embedding_start in enumerate(range(0, n_tokens, stride)):
+      embedding_mask = [0] * window_size + 2 * context  # Matrix for keeping track of what parts of each sequence is supposed to be embedded at each step.  
+      #logger.debug(f'Working with segment {i}')
+      if embedding_start == 0:  # first tokens
+          start = 0
+          end = window_size + 2 * context
+          #logger.debug(f'First section detected. {(start, end)}')
+          embedding_mask[embedding_start:window_size] = 1
+          #logger.debug(embedding_mask[:])
+      elif n_tokens - embedding_start < window_size:  # embedding-window overlapping end of string.
+          start = n_tokens - (window_size + 2 * context)
+          end = n_tokens
+          #logger.debug(f'Overlapping end of string detected {(start, end)}')
+          embedding_mask[embedding_start - start:end] = 1
+          #logger.debug(embedding_mask[:])
+      else:  # somewhere in the middle
+          end = min(embedding_start + window_size + context, n_tokens)  # Prevents context from falling outside range of text
+          start = end - (window_size + 2 * context)  # Start is always fixed size from end. This makes sure the number of words in the context stays fixed.
+          #logger.debug(f'Neither at start or end of row. Context might be out of range, but is moved to where it fits. {(start, end)}. Length of segment: {end-start}')
+          embedding_mask[embedding_start - start:embedding_start + window_size - start] = 1
+          #logger.debug(embedding_mask[:])
+      #end if
+
+      subexamples.append(InputSubexample((example.unique_id, i), tokens[start:end], embedding_mask))
+  # end for
+
+  return subexamples
+
+
 def convert_examples_to_features(examples, seq_length, tokenizer):
   """Loads a data file into a list of `InputBatch`s."""
+  #TODO: Reshape examples so that they fit the seq_length
 
   features = []
   for (ex_index, example) in enumerate(examples):
-    tokens_a = tokenizer.tokenize(example.text_a)
+    subexamples = _generate_subexamples(example, seq_length, tokenizer)
 
-    tokens_b = None
-    if example.text_b:
-      tokens_b = tokenizer.tokenize(example.text_b)
-
-    if tokens_b:
-      # Modifies `tokens_a` and `tokens_b` in place so that the total
-      # length is less than the specified length.
-      # Account for [CLS], [SEP], [SEP] with "- 3"
-      _truncate_seq_pair(tokens_a, tokens_b, seq_length - 3)
-    else:
-      # Account for [CLS] and [SEP] with "- 2"
-      if len(tokens_a) > seq_length - 2:
-        tokens_a = tokens_a[0:(seq_length - 2)]
-
-    # The convention in BERT is:
-    # (a) For sequence pairs:
-    #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
-    #  type_ids: 0     0  0    0    0     0       0 0     1  1  1  1   1 1
-    # (b) For single sequences:
-    #  tokens:   [CLS] the dog is hairy . [SEP]
-    #  type_ids: 0     0   0   0  0     0 0
-    #
-    # Where "type_ids" are used to indicate whether this is the first
-    # sequence or the second sequence. The embedding vectors for `type=0` and
-    # `type=1` were learned during pre-training and are added to the wordpiece
-    # embedding vector (and position vector). This is not *strictly* necessary
-    # since the [SEP] token unambiguously separates the sequences, but it makes
-    # it easier for the model to learn the concept of sequences.
-    #
-    # For classification tasks, the first vector (corresponding to [CLS]) is
-    # used as as the "sentence vector". Note that this only makes sense because
-    # the entire model is fine-tuned.
-    tokens = []
-    input_type_ids = []
-    tokens.append("[CLS]")
-    input_type_ids.append(0)
-    for token in tokens_a:
-      tokens.append(token)
+    for subexample in subexamples:
+      tokens_a = subexample.tokens_a
+      # The convention in BERT is:
+      # (a) For sequence pairs:
+      #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
+      #  type_ids: 0     0  0    0    0     0       0 0     1  1  1  1   1 1
+      # (b) For single sequences:
+      #  tokens:   [CLS] the dog is hairy . [SEP]
+      #  type_ids: 0     0   0   0  0     0 0
+      #
+      # Where "type_ids" are used to indicate whether this is the first
+      # sequence or the second sequence. The embedding vectors for `type=0` and
+      # `type=1` were learned during pre-training and are added to the wordpiece
+      # embedding vector (and position vector). This is not *strictly* necessary
+      # since the [SEP] token unambiguously separates the sequences, but it makes
+      # it easier for the model to learn the concept of sequences.
+      #
+      # For classification tasks, the first vector (corresponding to [CLS]) is
+      # used as as the "sentence vector". Note that this only makes sense because
+      # the entire model is fine-tuned.
+      tokens = []
+      input_type_ids = []
+      tokens.append("[CLS]")
       input_type_ids.append(0)
-    tokens.append("[SEP]")
-    input_type_ids.append(0)
-
-    if tokens_b:
-      for token in tokens_b:
+      for token in tokens_a:
         tokens.append(token)
-        input_type_ids.append(1)
+        input_type_ids.append(0)
       tokens.append("[SEP]")
-      input_type_ids.append(1)
-
-    input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-    # The mask has 1 for real tokens and 0 for padding tokens. Only real
-    # tokens are attended to.
-    input_mask = [1] * len(input_ids)
-
-    # Zero-pad up to the sequence length.
-    while len(input_ids) < seq_length:
-      input_ids.append(0)
-      input_mask.append(0)
       input_type_ids.append(0)
 
-    assert len(input_ids) == seq_length
-    assert len(input_mask) == seq_length
-    assert len(input_type_ids) == seq_length
+      input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
-    if ex_index < 5:
-      tf.logging.info("*** Example ***")
-      tf.logging.info("unique_id: %s" % (example.unique_id))
-      tf.logging.info("tokens: %s" % " ".join(
-          [tokenization.printable_text(x) for x in tokens]))
-      tf.logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-      tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
-      tf.logging.info(
-          "input_type_ids: %s" % " ".join([str(x) for x in input_type_ids]))
+      # The mask has 1 for real tokens and 0 for padding tokens. Only real
+      # tokens are attended to.
+      input_mask = [1] * len(input_ids)
 
-    features.append(
-        InputFeatures(
-            unique_id=example.unique_id,
-            tokens=tokens,
-            input_ids=input_ids,
-            input_mask=input_mask,
-            input_type_ids=input_type_ids))
+      # Zero-pad up to the sequence length.
+      while len(input_ids) < seq_length:
+        input_ids.append(0)
+        input_mask.append(0)
+        input_type_ids.append(0)
+
+      assert len(input_ids) == seq_length
+      assert len(input_mask) == seq_length
+      assert len(input_type_ids) == seq_length
+
+      if ex_index < 5:
+        tf.logging.info("*** Example ***")
+        tf.logging.info("unique_id: %s" % (subexample.unique_id))
+        tf.logging.info("tokens: %s" % " ".join(
+            [tokenization.printable_text(x) for x in tokens]))
+        tf.logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
+        tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
+        tf.logging.info(
+            "input_type_ids: %s" % " ".join([str(x) for x in input_type_ids]))
+
+      features.append(
+          InputFeatures(
+              unique_id=subexample.unique_id,
+              tokens=tokens,
+              input_ids=input_ids,
+              input_mask=input_mask,
+              input_type_ids=input_type_ids,
+              embedding_mask=subexample.embedding_mask))
   return features
 
 
@@ -386,6 +427,8 @@ def main(_):
 
   with codecs.getwriter("utf-8")(tf.gfile.Open(FLAGS.output_file,
                                                "w")) as writer:
+    #TODO: Would idealy like to clean up the extracted features for an entire document here 
+    # so that we dont write unecessary things to the file. (Doubeling its size. )
     for result in estimator.predict(input_fn, yield_single_examples=True):
       unique_id = int(result["unique_id"])
       feature = unique_id_to_feature[unique_id]
@@ -393,6 +436,8 @@ def main(_):
       output_json["linex_index"] = unique_id
       all_features = []
       for (i, token) in enumerate(feature.tokens):
+        if not feature.embedding_mask[i]:
+          continue
         all_layers = []
         for (j, layer_index) in enumerate(layer_indexes):
           layer_output = result["layer_output_%d" % j]
