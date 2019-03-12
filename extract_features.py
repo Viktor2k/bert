@@ -321,7 +321,7 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
 
       if ex_index < 5:
         tf.logging.info("*** Example ***")
-        tf.logging.info("unique_id: %s" % (subexample.unique_id))
+        tf.logging.info("unique_id: %d_%d" % subexample.unique_id)
         tf.logging.info("tokens: %s" % " ".join(
             [tokenization.printable_text(x) for x in tokens]))
         tf.logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
