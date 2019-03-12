@@ -243,19 +243,19 @@ def _generate_subexamples(example, seq_length, tokenizer):
           start = 0
           end = window_size + 2 * context
           #logger.debug(f'First section detected. {(start, end)}')
-          embedding_mask[embedding_start:window_size] = 1
+          embedding_mask[embedding_start:window_size] = [1] * (1 + window_size - embedding_start)
           #logger.debug(embedding_mask[:])
       elif n_tokens - embedding_start < window_size:  # embedding-window overlapping end of string.
           start = n_tokens - (window_size + 2 * context)
           end = n_tokens
           #logger.debug(f'Overlapping end of string detected {(start, end)}')
-          embedding_mask[embedding_start - start:end] = 1
+          embedding_mask[embedding_start - start:end] = [1] * (1 + end - (embedding_start - start))
           #logger.debug(embedding_mask[:])
       else:  # somewhere in the middle
           end = min(embedding_start + window_size + context, n_tokens)  # Prevents context from falling outside range of text
           start = end - (window_size + 2 * context)  # Start is always fixed size from end. This makes sure the number of words in the context stays fixed.
           #logger.debug(f'Neither at start or end of row. Context might be out of range, but is moved to where it fits. {(start, end)}. Length of segment: {end-start}')
-          embedding_mask[embedding_start - start:embedding_start + window_size - start] = 1
+          embedding_mask[embedding_start - start:embedding_start + window_size - start] = [1] * (1 + (embedding_start + window_size - start) - (embedding_start - start))
           #logger.debug(embedding_mask[:])
       #end if
 
