@@ -328,6 +328,8 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
         tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
         tf.logging.info(
             "input_type_ids: %s" % " ".join([str(x) for x in input_type_ids]))
+        tf.logging.info(
+            "embedding_mask: %s" % " ".join([str(x) for x in subexample.embedding_mask]))
 
       features.append(
           InputFeatures(
@@ -399,10 +401,10 @@ def main(_):
           per_host_input_for_training=is_per_host))
 
   examples = read_examples(FLAGS.input_file)
-  print(f'Total number of features: {len(examples)}')
+  print(f'Total number of examples: {len(examples)}')
   features = convert_examples_to_features(
       examples=examples, seq_length=FLAGS.max_seq_length, tokenizer=tokenizer)
-  print(f'Total number of features: {len(features)}')
+  print(f'Total number of examples after splitting: {len(features)}')
   unique_id_to_feature = {}
   for feature in features:
     unique_id_to_feature[feature.unique_id] = feature
