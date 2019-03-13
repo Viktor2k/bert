@@ -259,7 +259,7 @@ def _generate_subexamples(example, seq_length, tokenizer):
           #logger.debug(embedding_mask[:])
       #end if
 
-      subexamples.append(InputSubexample((example.unique_id, i), tokens[start:end], embedding_mask))
+      subexamples.append(InputSubexample(example.unique_id, tokens[start:end], embedding_mask))
   # end for
 
   return subexamples
@@ -321,7 +321,8 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
 
       if ex_index < 5:
         tf.logging.info("*** Example ***")
-        tf.logging.info("unique_id: %d_%d" % subexample.unique_id)
+        #tf.logging.info("unique_id: %d_%d" % subexample.unique_id)
+        tf.logging.info("unique_id: %d" % subexample.unique_id)
         tf.logging.info("tokens: %s" % " ".join(
             [tokenization.printable_text(x) for x in tokens]))
         tf.logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
