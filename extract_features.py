@@ -26,7 +26,8 @@ import re
 import modeling
 import tokenization
 import tensorflow as tf
-import numpy as np
+
+from itertools import count
 
 flags = tf.flags
 
@@ -89,8 +90,11 @@ class InputExample(object):
 
 class InputSubexample(object):
 
-  def __init__(self, unique_id, tokens_a, embedding_mask):
-    self.unique_id = unique_id
+  _ids = count(0)
+
+  def __init__(self, example_id, seq_id, tokens_a, embedding_mask):
+    self.unique_id = next(self._ids)
+    self.seq_coord = (example_id, seq_id)
     self.tokens_a = tokens_a
     self.embedding_mask = embedding_mask
 
@@ -98,13 +102,14 @@ class InputSubexample(object):
 class InputFeatures(object):
   """A single set of features of data."""
 
-  def __init__(self, unique_id, tokens, input_ids, input_mask, input_type_ids, embedding_mask):
+  def __init__(self, unique_id, tokens, input_ids, input_mask, input_type_ids, embedding_mask, seq_coord):
     self.unique_id = unique_id
     self.tokens = tokens
     self.input_ids = input_ids
     self.input_mask = input_mask
     self.input_type_ids = input_type_ids
     self.embedding_mask = embedding_mask
+    self.seq_coord = seq_coord
 
 
 def input_fn_builder(features, seq_length):
@@ -230,7 +235,7 @@ def _generate_subexamples(example, seq_length, tokenizer):
 
   if n_tokens < window_size + 2 * context:  # The entire text will fit within the scope of window and context in the first pass. No need to process this text twice. 
       #logger.debug('The entire text will fit within the scope of window and context in the first pass. No need to process this text twice. ')
-      subexamples.append(InputSubexample((example.unique_id, 0), tokens, [1] * n_tokens))
+      subexamples.append(InputSubexample(example.unique_id, 0, tokens, [1] * n_tokens))
       return subexamples
   #end if
 
@@ -259,7 +264,7 @@ def _generate_subexamples(example, seq_length, tokenizer):
           #logger.debug(embedding_mask[:])
       #end if
 
-      subexamples.append(InputSubexample(example.unique_id, tokens[start:end], embedding_mask))
+      subexamples.append(InputSubexample(example.unique_id, i, tokens[start:end], embedding_mask))
   # end for
 
   return subexamples
@@ -294,14 +299,18 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
       # used as as the "sentence vector". Note that this only makes sense because
       # the entire model is fine-tuned.
       tokens = []
+      embedding_mask = []
       input_type_ids = []
       tokens.append("[CLS]")
       input_type_ids.append(0)
-      for token in tokens_a:
+      embedding_mask.append(0)  # I dont need the embedding for the [CLS]-token
+      for token, embedding_bool in zip(tokens_a, subexample.embedding_mask):
         tokens.append(token)
+        embedding_mask.append(embedding_bool)
         input_type_ids.append(0)
       tokens.append("[SEP]")
       input_type_ids.append(0)
+      embedding_mask.append(0)  # I dont need the embedding for the [SEP]-token
 
       input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
@@ -314,15 +323,17 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
         input_ids.append(0)
         input_mask.append(0)
         input_type_ids.append(0)
+        embedding_mask.append(0)
 
       assert len(input_ids) == seq_length
       assert len(input_mask) == seq_length
       assert len(input_type_ids) == seq_length
+      assert len(embedding_mask) == seq_length
 
       if ex_index < 5:
         tf.logging.info("*** Example ***")
         #tf.logging.info("unique_id: %d_%d" % subexample.unique_id)
-        tf.logging.info("unique_id: %d" % subexample.unique_id)
+        tf.logging.info("unique_id: %s" % (subexample.unique_id))
         tf.logging.info("tokens: %s" % " ".join(
             [tokenization.printable_text(x) for x in tokens]))
         tf.logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
@@ -330,7 +341,7 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
         tf.logging.info(
             "input_type_ids: %s" % " ".join([str(x) for x in input_type_ids]))
         tf.logging.info(
-            "embedding_mask: %s" % " ".join([str(x) for x in subexample.embedding_mask]))
+            "embedding_mask: %s" % " ".join([str(x) for x in embedding_mask]))
 
       features.append(
           InputFeatures(
@@ -339,7 +350,8 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
               input_ids=input_ids,
               input_mask=input_mask,
               input_type_ids=input_type_ids,
-              embedding_mask=subexample.embedding_mask))
+              embedding_mask=embedding_mask,
+              seq_coord=subexample.seq_coord))
   return features
 
 
@@ -436,6 +448,7 @@ def main(_):
       feature = unique_id_to_feature[unique_id]
       output_json = collections.OrderedDict()
       output_json["linex_index"] = unique_id
+      output_json["sequence_coordinate"] = feature.seq_coord
       all_features = []
       for (i, token) in enumerate(feature.tokens):
         if not feature.embedding_mask[i]:
