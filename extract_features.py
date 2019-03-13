@@ -399,10 +399,10 @@ def main(_):
           per_host_input_for_training=is_per_host))
 
   examples = read_examples(FLAGS.input_file)
-
+  print(f'Total number of features: {len(examples)}')
   features = convert_examples_to_features(
       examples=examples, seq_length=FLAGS.max_seq_length, tokenizer=tokenizer)
-
+  print(f'Total number of features: {len(features)}')
   unique_id_to_feature = {}
   for feature in features:
     unique_id_to_feature[feature.unique_id] = feature
@@ -428,8 +428,6 @@ def main(_):
 
   with codecs.getwriter("utf-8")(tf.gfile.Open(FLAGS.output_file,
                                                "w")) as writer:
-    #TODO: Would idealy like to clean up the extracted features for an entire document here 
-    # so that we dont write unecessary things to the file. (Doubeling its size. )
     for result in estimator.predict(input_fn, yield_single_examples=True):
       unique_id = int(result["unique_id"])
       feature = unique_id_to_feature[unique_id]
