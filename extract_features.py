@@ -234,38 +234,41 @@ def _generate_subexamples(example, seq_length, tokenizer):
   subexamples = []
 
   if n_tokens < window_size + 2 * context:  # The entire text will fit within the scope of window and context in the first pass. No need to process this text twice. 
-      #logger.debug('The entire text will fit within the scope of window and context in the first pass. No need to process this text twice. ')
       subexamples.append(InputSubexample(example.unique_id, 0, tokens, [1] * n_tokens))
       return subexamples
   #end if
 
-  #logger.debug(f'Expecting a total of {np.ceil(n_tokens / window_size)} chunks from this document of length {n_tokens}.')
-
   for i, embedding_start in enumerate(range(0, n_tokens, stride)):
       embedding_mask = [0] * (window_size + 2 * context)  # Matrix for keeping track of what parts of each sequence is supposed to be embedded at each step.  
-      #logger.debug(f'Working with segment {i}')
       if embedding_start == 0:  # first tokens
           start = 0
           end = window_size + 2 * context
-          #logger.debug(f'First section detected. {(start, end)}')
-          embedding_mask[embedding_start:window_size] = [1] * (1 + window_size - embedding_start)
-          #logger.debug(embedding_mask[:])
+          embedding_mask[embedding_start:window_size] = [1] * (window_size - embedding_start)
+          assert(len(embedding_mask) == (window_size + 2 * context))
+
       elif n_tokens - embedding_start < window_size:  # embedding-window overlapping end of string.
           start = n_tokens - (window_size + 2 * context)
           end = n_tokens
-          #logger.debug(f'Overlapping end of string detected {(start, end)}')
-          embedding_mask[embedding_start - start:end] = [1] * (1 + end - (embedding_start - start))
-          #logger.debug(embedding_mask[:])
+          embedding_mask[embedding_start - start:end - start] = [1] * (end - start - (embedding_start - start))
+          assert(len(embedding_mask) == (window_size + 2 * context))
+
       else:  # somewhere in the middle
           end = min(embedding_start + window_size + context, n_tokens)  # Prevents context from falling outside range of text
           start = end - (window_size + 2 * context)  # Start is always fixed size from end. This makes sure the number of words in the context stays fixed.
-          #logger.debug(f'Neither at start or end of row. Context might be out of range, but is moved to where it fits. {(start, end)}. Length of segment: {end-start}')
-          embedding_mask[embedding_start - start:embedding_start + window_size - start] = [1] * (1 + (embedding_start + window_size - start) - (embedding_start - start))
-          #logger.debug(embedding_mask[:])
+          embedding_mask[embedding_start - start:embedding_start + window_size - start] = [1] * ((embedding_start + window_size - start) - (embedding_start - start))
+          assert(len(embedding_mask) == (window_size + 2 * context))
       #end if
 
       subexamples.append(InputSubexample(example.unique_id, i, tokens[start:end], embedding_mask))
   # end for
+
+  #extract the tokens that should be embedded in each step and make sure they add up to be the entire text.
+  tokens_to_be_embedded = []
+  for subexample in subexamples:
+    for token, embedding_bool in zip(subexample.tokens_a, subexample.embedding_mask):
+      if embedding_bool:
+        tokens_to_be_embedded.append(token)
+  assert(tokens_to_be_embedded == tokens)
 
   return subexamples
 
