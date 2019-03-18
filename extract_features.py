@@ -368,9 +368,9 @@ def _write_features_to_file(writer, doc_features, doc_num):
 #end def
 
 
-def combine_features(temp_output_file):
-    with codecs.getwriter("utf-8")(tf.gfile.Open(FLAGS.output_file, "w")) as writer:
-        with tf.gfile.GFile(temp_output_file, "r") as f:
+def combine_features(fractured_json, combined_json):
+    with codecs.getwriter("utf-8")(tf.gfile.Open(combined_json, "w")) as writer:
+        with tf.gfile.GFile(fractured_json, "r") as f:
             row_data = None
             while True:
                 if not row_data:
@@ -386,24 +386,24 @@ def combine_features(temp_output_file):
                 doc_num = row_data['sequence_coordinate'][0]
                 seq_num = row_data['sequence_coordinate'][1]
                 doc_features[seq_num] = row_data['features']
-                print(f'Working with document {(doc_num, seq_num)}')
+                #print(f'Working with document {(doc_num, seq_num)}')
                 while True:
                     try:
                         #Extract the following row and test its doc_num
                         row_data = json.loads(next(f))
                         d = row_data["sequence_coordinate"][0]
                         r = row_data["sequence_coordinate"][1]
-                        print(f'Working with document {(d, r)}')
+                        #print(f'Working with document {(d, r)}')
                         if row_data['sequence_coordinate'][0] == doc_num:  # same doc_num as before, extract features and continue
                             doc_features[row_data['sequence_coordinate'][1]] = row_data['features']
                         else:  # i
                             _write_features_to_file(writer, doc_features, doc_num)
-                            print(f'Wrote {doc_num} to feature list from try')
+                            #print(f'Wrote {doc_num} to feature list from try')
                             break
                             # append features from doc_features to feature list according to their key-value
                     except:
                         _write_features_to_file(writer, doc_features, doc_num)
-                        print(f'Wrote {doc_num} to feature list from except')
+                        #print(f'Wrote {doc_num} to feature list from except')
                         row_data = None
                         break
                     #end try
@@ -415,7 +415,7 @@ def combine_features(temp_output_file):
 
 def batch_input(input_file, batch_size=2):
     #returns list of batched files:
-    path, file_name = os.path.split(FLAGS.output_file)
+    path, file_name = os.path.split(input_file)
     file_, ext = os.path.splitext(file_name)
     cur_batch = []
     batch_files = []
@@ -453,9 +453,9 @@ def main(_):
 
     # Run batch data and then loop over these files
     batch_files = batch_input(FLAGS.input_file)
-    print(batch_files)
-    exit
-    for input_file in batch_files:
+
+    for b, input_file in enumerate(batch_files, start=1):
+        start = time.time()
         examples = read_examples(input_file)
         features = convert_examples_to_features(examples=examples, seq_length=FLAGS.max_seq_length, tokenizer=tokenizer)
         unique_id_to_feature = {}
@@ -505,7 +505,8 @@ def main(_):
                 writer.write(json.dumps(output_json) + "\n")
             #end for
         #end with
-        combine_features(temp_output_file)
+        combine_features(temp_output_file, os.path.join(os.path.splitext(input_file)[0], '.json'))
+        tf.logger(f'Saved batch {b} of {len(batch_files)} to {os.path.join(os.path.splitext(input_file)[0], '.json')} which took {round(time.time()-start)} seconds.')
 #end def
 
 if __name__ == "__main__":
