@@ -413,6 +413,32 @@ def combine_features(temp_output_file):
 #end def
 
 
+def batch_input(input_file, batch_size=2):
+    #returns list of batched files:
+    path, file_name = os.path.split(FLAGS.output_file)
+    file_, ext = os.path.splitext(file_name)
+    cur_batch = []
+    batch_files = []
+    with tf.gfile.Open(input_file) as f:
+        for i, row in enumerate(f, start=1):
+            if i % batch_size == 0:
+                batch_file_name = f'{os.path.join(path, file_)}_batch_{int(i/batch_size)}{ext}'
+                batch_files.append(batch_file_name)
+                with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as writer:
+                    for b in cur_batch:
+                        writer.write(b + '\n')
+                    #end for
+                #end with
+                cur_batch = []
+            else:
+                cur_batch.append(row)
+            #end if
+        #end for
+    #end with
+    return batch_files
+#end def
+
+
 def main(_):
     tf.logging.set_verbosity(tf.logging.INFO)
 
@@ -425,56 +451,61 @@ def main(_):
     is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
     run_config = tf.contrib.tpu.RunConfig(master=FLAGS.master, tpu_config=tf.contrib.tpu.TPUConfig(num_shards=FLAGS.num_tpu_cores, per_host_input_for_training=is_per_host))
 
-    examples = read_examples(FLAGS.input_file)
-    features = convert_examples_to_features(examples=examples, seq_length=FLAGS.max_seq_length, tokenizer=tokenizer)
-    unique_id_to_feature = {}
-    for feature in features:
-        unique_id_to_feature[feature.unique_id] = feature
+    # Run batch data and then loop over these files
+    batch_files = batch_input(FLAGS.input_file)
+    print(batch_files)
+    exit
+    for input_file in batch_files:
+        examples = read_examples(input_file)
+        features = convert_examples_to_features(examples=examples, seq_length=FLAGS.max_seq_length, tokenizer=tokenizer)
+        unique_id_to_feature = {}
+        for feature in features:
+            unique_id_to_feature[feature.unique_id] = feature
 
-    model_fn = model_fn_builder(bert_config=bert_config, init_checkpoint=FLAGS.init_checkpoint, layer_indexes=layer_indexes, use_tpu=FLAGS.use_tpu, use_one_hot_embeddings=FLAGS.use_one_hot_embeddings)
+        model_fn = model_fn_builder(bert_config=bert_config, init_checkpoint=FLAGS.init_checkpoint, layer_indexes=layer_indexes, use_tpu=FLAGS.use_tpu, use_one_hot_embeddings=FLAGS.use_one_hot_embeddings)
 
-    # If TPU is not available, this will fall back to normal Estimator on CPU
-    # or GPU.
-    estimator = tf.contrib.tpu.TPUEstimator(use_tpu=FLAGS.use_tpu, model_fn=model_fn, config=run_config, predict_batch_size=FLAGS.batch_size, train_batch_size=256)
+        # If TPU is not available, this will fall back to normal Estimator on CPU
+        # or GPU.
+        estimator = tf.contrib.tpu.TPUEstimator(use_tpu=FLAGS.use_tpu, model_fn=model_fn, config=run_config, predict_batch_size=FLAGS.batch_size, train_batch_size=256)
 
-    input_fn = input_fn_builder(features=features, seq_length=FLAGS.max_seq_length)
+        input_fn = input_fn_builder(features=features, seq_length=FLAGS.max_seq_length)
 
-    path, file_name = os.path.split(FLAGS.output_file)
-    temp_file_name = f'temp_{file_name}'
-    temp_output_file = os.path.join(path, temp_file_name)
+        path, file_name = os.path.split(FLAGS.output_file)
+        temp_file_name = f'temp_{file_name}'
+        temp_output_file = os.path.join(path, temp_file_name)
 
-    with codecs.getwriter("utf-8")(tf.gfile.Open(temp_output_file, "w")) as writer:
-        for result in estimator.predict(input_fn, yield_single_examples=True):
-            unique_id = int(result["unique_id"])
-            feature = unique_id_to_feature[unique_id]
-            output_json = collections.OrderedDict()
-            output_json["linex_index"] = unique_id
-            output_json["sequence_coordinate"] = feature.seq_coord
-            all_features = []
-            for (i, token) in enumerate(feature.tokens):
-                if not feature.embedding_mask[i]:
-                    continue
-                #end if
-                all_layers = []
-                for (j, layer_index) in enumerate(layer_indexes):
-                    layer_output = result["layer_output_%d" % j]
-                    layers = collections.OrderedDict()
-                    layers["index"] = layer_index
-                    layers["values"] = [round(float(x), 6) for x in layer_output[i:(i + 1)].flat]
-                    all_layers.append(layers)
+        with codecs.getwriter("utf-8")(tf.gfile.Open(temp_output_file, "w")) as writer:
+            for result in estimator.predict(input_fn, yield_single_examples=True):
+                unique_id = int(result["unique_id"])
+                feature = unique_id_to_feature[unique_id]
+                output_json = collections.OrderedDict()
+                output_json["linex_index"] = unique_id
+                output_json["sequence_coordinate"] = feature.seq_coord
+                all_features = []
+                for (i, token) in enumerate(feature.tokens):
+                    if not feature.embedding_mask[i]:
+                        continue
+                    #end if
+                    all_layers = []
+                    for (j, layer_index) in enumerate(layer_indexes):
+                        layer_output = result["layer_output_%d" % j]
+                        layers = collections.OrderedDict()
+                        layers["index"] = layer_index
+                        layers["values"] = [round(float(x), 6) for x in layer_output[i:(i + 1)].flat]
+                        all_layers.append(layers)
+                    #end for
+
+                    features = collections.OrderedDict()
+                    features["token"] = token
+                    features["layers"] = all_layers
+                    all_features.append(features)
                 #end for
 
-                features = collections.OrderedDict()
-                features["token"] = token
-                features["layers"] = all_layers
-                all_features.append(features)
+                output_json["features"] = all_features
+                writer.write(json.dumps(output_json) + "\n")
             #end for
-
-            output_json["features"] = all_features
-            writer.write(json.dumps(output_json) + "\n")
-        #end for
-    #end with
-    combine_features(temp_output_file)
+        #end with
+        combine_features(temp_output_file)
 #end def
 
 if __name__ == "__main__":
