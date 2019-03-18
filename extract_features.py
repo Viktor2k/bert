@@ -435,6 +435,14 @@ def batch_input(input_file, batch_size=1000):
                 cur_batch = []
             #end if
         #end for
+        if len(batch_files) == 0: # inputfile smaller than batch_size
+            f'{os.path.join(path, file_)}_batch_{0}{ext}'
+            with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as writer:
+                    for b in cur_batch:
+                        writer.write(b)
+                    #end for
+                #end with
+
     #end with
     return batch_files
 #end def
