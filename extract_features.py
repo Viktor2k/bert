@@ -23,10 +23,12 @@ import collections
 import json
 import re
 import os
+import time
 
 import modeling
 import tokenization
 import tensorflow as tf
+
 
 from itertools import count
 
@@ -413,7 +415,7 @@ def combine_features(fractured_json, combined_json):
 #end def
 
 
-def batch_input(input_file, batch_size=2):
+def batch_input(input_file, batch_size=1000):
     #returns list of batched files:
     path, file_name = os.path.split(input_file)
     file_, ext = os.path.splitext(file_name)
@@ -421,17 +423,16 @@ def batch_input(input_file, batch_size=2):
     batch_files = []
     with tf.gfile.Open(input_file) as f:
         for i, row in enumerate(f, start=1):
+            cur_batch.append(row)
             if i % batch_size == 0:
                 batch_file_name = f'{os.path.join(path, file_)}_batch_{int(i/batch_size)}{ext}'
                 batch_files.append(batch_file_name)
                 with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as writer:
                     for b in cur_batch:
-                        writer.write(b + '\n')
+                        writer.write(b)
                     #end for
                 #end with
                 cur_batch = []
-            else:
-                cur_batch.append(row)
             #end if
         #end for
     #end with
@@ -454,6 +455,12 @@ def main(_):
     # Run batch data and then loop over these files
     batch_files = batch_input(FLAGS.input_file)
 
+    model_fn = model_fn_builder(bert_config=bert_config, init_checkpoint=FLAGS.init_checkpoint, layer_indexes=layer_indexes, use_tpu=FLAGS.use_tpu, use_one_hot_embeddings=FLAGS.use_one_hot_embeddings)
+
+    # If TPU is not available, this will fall back to normal Estimator on CPU
+    # or GPU.
+    estimator = tf.contrib.tpu.TPUEstimator(use_tpu=FLAGS.use_tpu, model_fn=model_fn, config=run_config, predict_batch_size=FLAGS.batch_size, train_batch_size=256)
+
     for b, input_file in enumerate(batch_files, start=1):
         start = time.time()
         examples = read_examples(input_file)
@@ -461,17 +468,12 @@ def main(_):
         unique_id_to_feature = {}
         for feature in features:
             unique_id_to_feature[feature.unique_id] = feature
-
-        model_fn = model_fn_builder(bert_config=bert_config, init_checkpoint=FLAGS.init_checkpoint, layer_indexes=layer_indexes, use_tpu=FLAGS.use_tpu, use_one_hot_embeddings=FLAGS.use_one_hot_embeddings)
-
-        # If TPU is not available, this will fall back to normal Estimator on CPU
-        # or GPU.
-        estimator = tf.contrib.tpu.TPUEstimator(use_tpu=FLAGS.use_tpu, model_fn=model_fn, config=run_config, predict_batch_size=FLAGS.batch_size, train_batch_size=256)
+        #end for
 
         input_fn = input_fn_builder(features=features, seq_length=FLAGS.max_seq_length)
 
-        path, file_name = os.path.split(FLAGS.output_file)
-        temp_file_name = f'temp_{file_name}'
+        path, _ = os.path.split(input_file)
+        temp_file_name = 'temp_batch_storage.json'
         temp_output_file = os.path.join(path, temp_file_name)
 
         with codecs.getwriter("utf-8")(tf.gfile.Open(temp_output_file, "w")) as writer:
@@ -505,8 +507,8 @@ def main(_):
                 writer.write(json.dumps(output_json) + "\n")
             #end for
         #end with
-        combine_features(temp_output_file, os.path.join(os.path.splitext(input_file)[0], '.json'))
-        tf.logger(f'Saved batch {b} of {len(batch_files)} to {os.path.join(os.path.splitext(input_file)[0], '.json')} which took {round(time.time()-start)} seconds.')
+        combine_features(temp_output_file, f'{os.path.splitext(input_file)[0]}.json')
+        tf.logging.info(f"\n\nSaved batch {b} of {len(batch_files)} to {f'{os.path.splitext(input_file)[0]}.json'} which took {round(time.time()-start)} seconds.\n\n")
 #end def
 
 if __name__ == "__main__":
