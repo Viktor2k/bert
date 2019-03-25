@@ -418,15 +418,41 @@ def combine_features(fractured_json, combined_json):
     #end with
 #end def
 
+def sort_input(input_file, output_file):
+    input_data = []
+    idx_to_n = {}
+    with tf.gfile.Open(input_file) as f:
+        for idx, row in enumerate(f):
+            input_data.append(row)
+
+            # Heuristic for number of sentences in this document
+            idx_to_n[idx] = row.count('.') + row.count('!') + row.count('?')
+        #end for
+    #end with
+
+    sort_order = sorted(idx_to_n.items(), key=lambda kv: kv[1])  # list of tuples (idx, n_sent)
+    with codecs.getwriter("utf-8")(tf.gfile.Open(output_file, 'w')) as f:
+        for s in sort_order:
+            input_data[s[0]]
+        #end for
+    #end with
+#end def
+
+
 
 def batch_input(input_file, batch_size=1000):
     '''returns list names for the batched file'''
 
     path, file_name = os.path.split(input_file)
     file_, ext = os.path.splitext(file_name)  # <dataset>_<datatype>_<label>.txt
+
+    #Sort files after number of sentences. 
+    sorted_file = os.path.join(path, f'{file_}_sorted_{ext}')
+    sort_input(input_file, sorted_file)
+    
     cur_batch = []
     batch_files = []
-    with tf.gfile.Open(input_file) as f:
+    with tf.gfile.Open(sorted_file) as f:
         for i, row in enumerate(f, start=1):
             cur_batch.append(row)
             if i % batch_size == 0:
@@ -477,6 +503,7 @@ def main(_):
     # or GPU.
     estimator = tf.contrib.tpu.TPUEstimator(use_tpu=FLAGS.use_tpu, model_fn=model_fn, config=run_config, predict_batch_size=FLAGS.batch_size, train_batch_size=256)
 
+    output_batch_files = []
     for b, input_file in enumerate(batch_files, start=1):
         start = time.time()
         examples = read_examples(input_file)
@@ -525,8 +552,13 @@ def main(_):
                 writer.write(json.dumps(output_json) + "\n")
             #end for
         #end with
-        combine_features(temp_output_file, f'{os.path.splitext(input_file)[0]}.json')
-        tf.logging.info(f"\n\nSaved batch {b} of {len(batch_files)} to {f'{os.path.splitext(input_file)[0]}.json'} which took {round(time.time()-start)} seconds.\n\n")
+        output_file = f'{os.path.splitext(input_file)[0]}.json'
+        output_batch_files.append(output_file)
+        combine_features(temp_output_file, output_file)
+        tf.logging.info(f"\n\nSaved batch {b} of {len(batch_files)} to {output_batch_files} which took {round(time.time()-start)} seconds.\n\n")
+    #end for
+
+
 #end def
 
 if __name__ == "__main__":
