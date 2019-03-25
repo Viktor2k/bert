@@ -79,10 +79,11 @@ flags.DEFINE_bool(
 
 class InputExample(object):
 
-    def __init__(self, unique_id, text_a, text_b):
+    def __init__(self, unique_id, text_a, text_b, label):
         self.unique_id = unique_id
         self.text_a = text_a
         self.text_b = text_b
+        self.label = label
 
 
 class InputSubexample(object):
@@ -99,8 +100,9 @@ class InputSubexample(object):
 class InputFeatures(object):
     """A single set of features of data."""
 
-    def __init__(self, unique_id, tokens, input_ids, input_mask, input_type_ids, embedding_mask, seq_coord):
+    def __init__(self, unique_id, label, tokens, input_ids, input_mask, input_type_ids, embedding_mask, seq_coord):
         self.unique_id = unique_id
+        self.label = label
         self.tokens = tokens
         self.input_ids = input_ids
         self.input_mask = input_mask
@@ -163,8 +165,7 @@ def model_fn_builder(bert_config, init_checkpoint, layer_indexes, use_tpu, use_o
         tvars = tf.trainable_variables()
         scaffold_fn = None
         (assignment_map,
-         initialized_variable_names) = modeling.get_assignment_map_from_checkpoint(
-                 tvars, init_checkpoint)
+         initialized_variable_names) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
         if use_tpu:
 
             def tpu_scaffold():
@@ -196,7 +197,7 @@ def model_fn_builder(bert_config, init_checkpoint, layer_indexes, use_tpu, use_o
 
 
 def _generate_subexamples(example, seq_length, tokenizer):
-    '''Takes an example and returns a list of subexamples that fit the size of seq_len'''
+    '''Takes an example and returns a list of subexamples that fit the size of seq_length'''
     #logger.debug('------- New row to process -------')
     window_size = int(seq_length / 2)
     context = int(window_size / 2) - 1    # To make room for [CLS] and [SEP] tokens.
@@ -316,7 +317,7 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
                 tf.logging.info("input_type_ids: %s" % " ".join([str(x) for x in input_type_ids]))
                 tf.logging.info("embedding_mask: %s" % " ".join([str(x) for x in embedding_mask]))
 
-            features.append(InputFeatures(unique_id=subexample.unique_id, tokens=tokens, input_ids=input_ids, input_mask=input_mask, input_type_ids=input_type_ids, embedding_mask=embedding_mask, seq_coord=subexample.seq_coord))
+            features.append(InputFeatures(unique_id=subexample.unique_id, label=example.label, tokens=tokens, input_ids=input_ids, input_mask=input_mask, input_type_ids=input_type_ids, embedding_mask=embedding_mask, seq_coord=subexample.seq_coord))
     return features
 
 
@@ -341,6 +342,9 @@ def read_examples(input_file):
     """Read a list of `InputExample`s from an input file."""
     examples = []
     unique_id = 0
+
+    label = input_file.split('_')[2]  # Assumes input_file in on the standard format <dataset>_<datatype>_<label>_batch_<batch_id>.txt
+
     with tf.gfile.GFile(input_file, "r") as reader:
         while True:
             line = tokenization.convert_to_unicode(reader.readline())
@@ -355,77 +359,78 @@ def read_examples(input_file):
             else:
                 text_a = m.group(1)
                 text_b = m.group(2)
-            examples.append(InputExample(unique_id=unique_id, text_a=text_a, text_b=text_b))
+            examples.append(InputExample(unique_id=unique_id, text_a=text_a, text_b=text_b, label=label))
             unique_id += 1
     return examples
 
 
-def _write_features_to_file(writer, doc_features, doc_num):
+def _write_features_to_file(writer, doc_features, doc_num, label):
     temp_features = []
     for key in sorted(doc_features.keys()):
         temp_features.extend(doc_features[key])
     #end for
-    writer.write(json.dumps({"linex_index": doc_num, "features": temp_features}) + "\n")
+    writer.write(json.dumps({"linex_index": doc_num, "label": label, "features": temp_features}) + "\n")
     #end with
 #end def
 
 
 def combine_features(fractured_json, combined_json):
-    with codecs.getwriter("utf-8")(tf.gfile.Open(combined_json, "w")) as writer:
-        with tf.gfile.GFile(fractured_json, "r") as f:
-            row_data = None
-            while True:
-                if not row_data:
-                    try:
-                        row_data = json.loads(next(f))
-                    except:
-                        break
-                    #end try
-                #end if
+    with codecs.getwriter("utf-8")(tf.gfile.Open(combined_json, "w")) as writer, tf.gfile.GFile(fractured_json, "r") as f:
+        row_data = None
+        while True:
+            if not row_data:
+                try:
+                    row_data = json.loads(next(f))
+                except:
+                    break
+                #end try
+            #end if
 
-                doc_features = {}
-                # Extract the first row, or the first row with this sequence
-                doc_num = row_data['sequence_coordinate'][0]
-                seq_num = row_data['sequence_coordinate'][1]
-                doc_features[seq_num] = row_data['features']
-                #print(f'Working with document {(doc_num, seq_num)}')
-                while True:
-                    try:
-                        #Extract the following row and test its doc_num
-                        row_data = json.loads(next(f))
-                        d = row_data["sequence_coordinate"][0]
-                        r = row_data["sequence_coordinate"][1]
-                        #print(f'Working with document {(d, r)}')
-                        if row_data['sequence_coordinate'][0] == doc_num:  # same doc_num as before, extract features and continue
-                            doc_features[row_data['sequence_coordinate'][1]] = row_data['features']
-                        else:  # i
-                            _write_features_to_file(writer, doc_features, doc_num)
-                            #print(f'Wrote {doc_num} to feature list from try')
-                            break
-                            # append features from doc_features to feature list according to their key-value
-                    except:
-                        _write_features_to_file(writer, doc_features, doc_num)
-                        #print(f'Wrote {doc_num} to feature list from except')
-                        row_data = None
+            doc_features = {}
+            # Extract the first row, or the first row with this sequence
+            doc_num = row_data['sequence_coordinate'][0]
+            seq_num = row_data['sequence_coordinate'][1]
+            doc_features[seq_num] = row_data['features']
+            label = row_data['label']
+            #print(f'Working with document {(doc_num, seq_num)}')
+            while True:
+                try:
+                    #Extract the following row and test its doc_num
+                    row_data = json.loads(next(f))
+                    d = row_data["sequence_coordinate"][0]
+                    r = row_data["sequence_coordinate"][1]
+                    #print(f'Working with document {(d, r)}')
+                    if row_data['sequence_coordinate'][0] == doc_num:  # same doc_num as before, extract features and continue
+                        doc_features[row_data['sequence_coordinate'][1]] = row_data['features']
+                    else:  # i
+                        _write_features_to_file(writer, doc_features, doc_num, label)
+                        #print(f'Wrote {doc_num} to feature list from try')
                         break
-                    #end try
-                #end while
+                        # append features from doc_features to feature list according to their key-value
+                except:
+                    _write_features_to_file(writer, doc_features, doc_num, label)
+                    #print(f'Wrote {doc_num} to feature list from except')
+                    row_data = None
+                    break
+                #end try
             #end while
-        #end with
+        #end while
+    #end with
 #end def
 
 
 def batch_input(input_file, batch_size=1000):
-    #returns list of batched files:
+    '''returns list names for the batched file'''
+
     path, file_name = os.path.split(input_file)
-    file_, ext = os.path.splitext(file_name)
+    file_, ext = os.path.splitext(file_name)  # <dataset>_<datatype>_<label>.txt
     cur_batch = []
     batch_files = []
     with tf.gfile.Open(input_file) as f:
         for i, row in enumerate(f, start=1):
             cur_batch.append(row)
             if i % batch_size == 0:
-                batch_file_name = f'{os.path.join(path, file_)}_batch_{int(i/batch_size)}{ext}'
+                batch_file_name = f'{os.path.join(path, file_)}_batch_{int(i/batch_size)}{ext}'  # <dataset>_<datatype>_<label>_batch_<batch_id>.txt
                 batch_files.append(batch_file_name)
                 with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as writer:
                     for b in cur_batch:
@@ -446,6 +451,7 @@ def batch_input(input_file, batch_size=1000):
             #end with
         #end if
     #end with
+
     return batch_files
 #end def
 
@@ -482,6 +488,7 @@ def main(_):
 
         input_fn = input_fn_builder(features=features, seq_length=FLAGS.max_seq_length)
 
+        # BERT outputs tokens for each subexample per row. These will later be combined to a single row for each instance, but saved in the temp file in the mean-while. 
         path, _ = os.path.split(input_file)
         temp_file_name = 'temp_batch_storage.json'
         temp_output_file = os.path.join(path, temp_file_name)
@@ -493,6 +500,7 @@ def main(_):
                 output_json = collections.OrderedDict()
                 output_json["linex_index"] = unique_id
                 output_json["sequence_coordinate"] = feature.seq_coord
+                output_json["label"] = feature.label
                 all_features = []
                 for (i, token) in enumerate(feature.tokens):
                     if not feature.embedding_mask[i]:
