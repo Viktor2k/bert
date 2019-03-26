@@ -450,19 +450,21 @@ def batch_input(input_file, batch_size=1000):
     '''returns list names for the batched file'''
 
     path, file_name = os.path.split(input_file)
-    file_, ext = os.path.splitext(file_name)  # <dataset>_<datatype>_<label>.csv
+    file_, ext = os.path.splitext(file_name)  # <dataset>_<datatype>.csv
     
     cur_batch = []
     batch_files = []
-    with tf.gfile.Open(input_file) as f:
-        for i, row in enumerate(f, start=1):
+    with tf.gfile.Open(input_file) as input_f:
+        csv_reader = csv.reader(input_f, delimiter=';')
+        for i, row in enumerate(csv_reader, start=1):
             cur_batch.append(row)
             if i % batch_size == 0:
-                batch_file_name = f'{os.path.join(path, file_)}_batch_{int(i/batch_size)}{ext}'  # <dataset>_<datatype>_<label>_batch_<batch_id>.txt
+                batch_file_name = f'{os.path.join(path, file_)}_batch_{int(i/batch_size)}{ext}'  # <dataset>_<datatype>_batch_<batch_id>.csv
                 batch_files.append(batch_file_name)
-                with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as writer:
+                with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as output_f:
+                    writer = csv.writer(output_f, delimiter=';')
                     for b in cur_batch:
-                        writer.write(b)
+                        writer.writerow(b)
                     #end for
                 #end with
                 cur_batch = []
@@ -473,12 +475,13 @@ def batch_input(input_file, batch_size=1000):
         batch_file_name = f'{os.path.join(path, file_)}_batch_0{ext}'
         batch_files.append(batch_file_name)
 
-        with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as writer:
+        with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as output_f:
+            writer = csv.writer(output_f, delimiter=';')
             for b in cur_batch:
-                writer.write(b)
+                writer.writerow(b)
             #end for
         #end with
-        #end if
+
     #end with
 
     return batch_files
