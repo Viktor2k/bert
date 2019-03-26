@@ -39,8 +39,6 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_string("input_file", None, "")
 
-flags.DEFINE_string("output_file", None, "")
-
 flags.DEFINE_string("layers", "-1,-2,-3,-4", "")
 
 flags.DEFINE_string(
@@ -501,8 +499,9 @@ def main(_):
     run_config = tf.contrib.tpu.RunConfig(master=FLAGS.master, tpu_config=tf.contrib.tpu.TPUConfig(num_shards=FLAGS.num_tpu_cores, per_host_input_for_training=is_per_host))
 
     # Run batch data and then loop over these files
+    tf.logging.info('Batching input file')
     batch_files = batch_input(FLAGS.input_file)
-
+    tf.logging.info(f'Done with batching input file. Total batches: {len(batch_files)}')
     model_fn = model_fn_builder(bert_config=bert_config, init_checkpoint=FLAGS.init_checkpoint, layer_indexes=layer_indexes, use_tpu=FLAGS.use_tpu, use_one_hot_embeddings=FLAGS.use_one_hot_embeddings)
 
     # If TPU is not available, this will fall back to normal Estimator on CPU
@@ -572,5 +571,4 @@ if __name__ == "__main__":
     flags.mark_flag_as_required("vocab_file")
     flags.mark_flag_as_required("bert_config_file")
     flags.mark_flag_as_required("init_checkpoint")
-    flags.mark_flag_as_required("output_file")
     tf.app.run()
