@@ -469,16 +469,18 @@ def batch_input(input_file, batch_size=1000):
             #end if
         #end for
 
-        # write the remaining files to a unique batch
-        batch_file_name = f'{os.path.join(path, file_)}_batch_0{ext}'
-        batch_files.append(batch_file_name)
+        if len(cur_batch) != 0:
+            # write the remaining files to a unique batch
+            batch_file_name = f'{os.path.join(path, file_)}_batch_0{ext}'
+            batch_files.append(batch_file_name)
 
-        with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as output_f:
-            writer = csv.writer(output_f, delimiter=';')
-            for b in cur_batch:
-                writer.writerow(b)
-            #end for
-        #end with
+            with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as output_f:
+                writer = csv.writer(output_f, delimiter=';')
+                for b in cur_batch:
+                    writer.writerow(b)
+                #end for
+            #end with
+        #end if
 
     #end with
 
