@@ -418,6 +418,7 @@ def combine_features(fractured_json, combined_json):
     #end with
 #end def
 
+
 def sort_input(input_file, output_file):
     input_data = []
     idx_to_n = {}
@@ -439,20 +440,15 @@ def sort_input(input_file, output_file):
 #end def
 
 
-
 def batch_input(input_file, batch_size=1000):
     '''returns list names for the batched file'''
 
     path, file_name = os.path.split(input_file)
-    file_, ext = os.path.splitext(file_name)  # <dataset>_<datatype>_<label>.txt
-
-    #Sort files after number of sentences. 
-    sorted_file = os.path.join(path, f'{file_}_sorted_{ext}')
-    sort_input(input_file, sorted_file)
+    file_, ext = os.path.splitext(file_name)  # <dataset>_<datatype>_<label>.csv
     
     cur_batch = []
     batch_files = []
-    with tf.gfile.Open(sorted_file) as f:
+    with tf.gfile.Open(input_file) as f:
         for i, row in enumerate(f, start=1):
             cur_batch.append(row)
             if i % batch_size == 0:
@@ -466,15 +462,16 @@ def batch_input(input_file, batch_size=1000):
                 cur_batch = []
             #end if
         #end for
-        if len(batch_files) == 0:  # inputfile smaller than batch_size
-            batch_file_name = f'{os.path.join(path, file_)}_batch_{0}{ext}'
-            batch_files.append(batch_file_name)
 
-            with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as writer:
-                for b in cur_batch:
-                    writer.write(b)
-                #end for
-            #end with
+        # write the remaining files to a unique batch
+        batch_file_name = f'{os.path.join(path, file_)}_batch_0{ext}'
+        batch_files.append(batch_file_name)
+
+        with codecs.getwriter("utf-8")(tf.gfile.Open(batch_file_name, "w")) as writer:
+            for b in cur_batch:
+                writer.write(b)
+            #end for
+        #end with
         #end if
     #end with
 
