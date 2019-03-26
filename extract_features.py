@@ -24,6 +24,7 @@ import json
 import re
 import os
 import time
+import csv
 
 import modeling
 import tokenization
@@ -343,13 +344,18 @@ def read_examples(input_file):
     examples = []
     unique_id = 0
 
-    label = input_file.split('_')[2]  # Assumes input_file in on the standard format <dataset>_<datatype>_<label>_batch_<batch_id>.txt
-
     with tf.gfile.GFile(input_file, "r") as reader:
+        csv_reader = csv.reader(reader, delimiter=';')
         while True:
-            line = tokenization.convert_to_unicode(reader.readline())
-            if not line:
+            try:
+                csv_row = next(csv_reader)
+            except StopIteration:
                 break
+            #end try
+
+            label = csv_row[0]
+            line = csv_row[1]
+
             line = line.strip()
             text_a = None
             text_b = None
