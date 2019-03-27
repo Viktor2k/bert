@@ -38,6 +38,7 @@ flags = tf.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("input_file", None, "")
+flags.DEFINE_bool("batch_file", True, "")
 
 flags.DEFINE_string("layers", "-1,-2,-3,-4", "")
 
@@ -444,14 +445,17 @@ def sort_input(input_file, output_file):
 #end def
 
 
-def batch_input(input_file, batch_size=1000):
+def batch_input(input_file, do_batch, batch_size=1000):
     '''returns list names for the batched file'''
 
     path, file_name = os.path.split(input_file)
     file_, ext = os.path.splitext(file_name)  # <dataset>_<datatype>.csv
-    
     cur_batch = []
     batch_files = []
+
+    if not do_batch:
+        return [input_file]
+    
     with tf.gfile.Open(input_file) as input_f:
         csv_reader = csv.reader(input_f, delimiter=';')
         for i, row in enumerate(csv_reader, start=1):
@@ -481,8 +485,8 @@ def batch_input(input_file, batch_size=1000):
                 #end for
             #end with
         #end if
-
     #end with
+
 
     return batch_files
 #end def
@@ -502,7 +506,7 @@ def main(_):
 
     # Run batch data and then loop over these files
     tf.logging.info('Batching input file')
-    batch_files = batch_input(FLAGS.input_file)
+    batch_files = batch_input(FLAGS.input_file, FLAGS.batch_file)
     tf.logging.info(f'Done with batching input file. Total batches: {len(batch_files)}')
     model_fn = model_fn_builder(bert_config=bert_config, init_checkpoint=FLAGS.init_checkpoint, layer_indexes=layer_indexes, use_tpu=FLAGS.use_tpu, use_one_hot_embeddings=FLAGS.use_one_hot_embeddings)
 
