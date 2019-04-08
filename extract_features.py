@@ -445,7 +445,7 @@ def sort_input(input_file, output_file):
 #end def
 
 
-def batch_input(input_file, do_batch, batch_size=1000):
+def batch_input(input_file, do_batch, batch_size=250):
     '''returns list names for the batched file'''
 
     path, file_name = os.path.split(input_file)
@@ -486,7 +486,6 @@ def batch_input(input_file, do_batch, batch_size=1000):
             #end with
         #end if
     #end with
-
 
     return batch_files
 #end def
