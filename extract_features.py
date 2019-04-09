@@ -424,28 +424,7 @@ def combine_features(fractured_json, combined_json):
 #end def
 
 
-def sort_input(input_file, output_file):
-    input_data = []
-    idx_to_n = {}
-    with tf.gfile.Open(input_file) as f:
-        for idx, row in enumerate(f):
-            input_data.append(row)
-
-            # Heuristic for number of sentences in this document
-            idx_to_n[idx] = row.count('.') + row.count('!') + row.count('?')
-        #end for
-    #end with
-
-    sort_order = sorted(idx_to_n.items(), key=lambda kv: kv[1])  # list of tuples (idx, n_sent)
-    with codecs.getwriter("utf-8")(tf.gfile.Open(output_file, 'w')) as f:
-        for s in sort_order:
-            input_data[s[0]]
-        #end for
-    #end with
-#end def
-
-
-def batch_input(input_file, do_batch, batch_size=250):
+def batch_input(input_file, do_batch, batch_size=200):
     '''returns list names for the batched file'''
 
     path, file_name = os.path.split(input_file)
