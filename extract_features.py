@@ -39,7 +39,7 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_string("input_file", None, "")
 flags.DEFINE_bool("batch_file", True, "")
-flags.DEFINE_integer("batch_size", 100, "Number of instances per file")
+flags.DEFINE_integer("csv_batch_size", 100, "Number of instances per csv file")
 
 flags.DEFINE_string("layers", "-1,-2,-3,-4", "")
 
